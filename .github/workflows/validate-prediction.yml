@@ -1,0 +1,44 @@
+name: Validate Market Prediction
+
+on:
+  schedule:
+    - cron: '5 17 * * 1-5'   # 12:05 PM CST
+    - cron: '5 20 * * 1-5'   # 3:05 PM CST
+  workflow_dispatch:
+
+jobs:
+  validate-close:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GH_PAT }}  # ✅ USE your PAT here
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install selenium beautifulsoup4 pandas pytz
+
+      - name: Set up Chrome & ChromeDriver
+        uses: browser-actions/setup-chrome@latest
+        with:
+          chrome-version: stable
+
+      - name: Run validation script
+        run: python validation_script.py
+
+      - name: Commit and push updated CSV log
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git remote set-url origin https://x-access-token:${GH_PAT}@github.com/PadhmaCebolu/market-alert-bot-test.git
+          git add market_predictions.csv
+          git commit -m "✅ Update log on $(date -u)" || echo "No changes to commit"
+          git push origin HEAD:main
