@@ -244,7 +244,10 @@ def get_price_from_investing(url):
         options.add_argument("--log-level=3")  # Suppress USB/logging warnings
         options.add_experimental_option("excludeSwitches", ["enable-logging"])  # Optional extra suppressor
 
-        driver = webdriver.Chrome(options=options)
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
+
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get(url)
         time.sleep(4)
         price = driver.find_element(By.CSS_SELECTOR, '[data-test="instrument-price-last"]').text.replace(",", "")
