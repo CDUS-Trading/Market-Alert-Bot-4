@@ -2,8 +2,11 @@ name: Market Alert Bot
 
 on:
   schedule:
-    - cron: '50 12 * * 1-5'   # 7:50 AM CDT (12:50 UTC)
-    - cron: '30 16 * * 1-5'  # 11:30 AM Chicago time (CDT)
+    # 7:35 AM CST (13:35 UTC) - Trigger for the 8:00 AM Signal
+    - cron: '35 13 * * 1-5'
+    
+    # 11:05 AM CST (17:05 UTC) - Trigger for the 11:30 AM Signal
+    - cron: '05 17 * * 1-5'
   workflow_dispatch:
 
 jobs:
