@@ -308,7 +308,6 @@ def estimate_direction(spx, es, prev_es, sentiment_score, vix, news):
             reasons.append(f"✅ Bullish: Low VIX ({vix}) suggests market calm")
 
     # Final Decision (Forced Binary)
-    # If score is 0 (Tie), we use sentiment_score as the tie-breaker
     if score > 0 or (score == 0 and sentiment_score > 0):
         direction = "📈 Forced Bullish"
     else:
@@ -439,17 +438,15 @@ def send_email(subject, spx, vix, es, news, direction, reasons, move_msg, to_ema
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
 def fetch_finance_data(symbol):
-    """Fetches price and previous close from Google Finance"""
+    """Internal helper to get price and prev close from Google Finance"""
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         url = f"https://www.google.com/finance/quote/{symbol}"
-        res = requests.get(url, headers=HEADERS, timeout=10)
+        res = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, "html.parser")
-        
-        # Current Price
         price_el = soup.select_one("div.YMlKec.fxKbKc")
         current_price = float(price_el.text.replace(",", "").replace("$", "")) if price_el else None
         
-        # Previous Close
         prev_close = None
         for row in soup.select("div.gyFHrc"):
             if "Previous close" in row.text:
@@ -457,8 +454,7 @@ def fetch_finance_data(symbol):
                 prev_close = float(val_text.replace(",", "").replace("$", ""))
                 break
         return current_price, prev_close
-    except Exception as e:
-        print(f"⚠️ Error fetching {symbol}: {e}")
+    except Exception:
         return None, None
 # =============================
 # 📊 Main
@@ -484,19 +480,24 @@ def main():
     spx = get_spx()
     vix = get_vix()
     es = get_es()
-    # If using the Google Finance method for prev_es:
-    _, prev_es = fetch_finance_data("ESW00:CME_MINI") 
+    
+    # IMPORTANT: Ensure you have fetch_finance_data defined to get prev_es
+    # Using the S&P 500 Index for a reliable previous close comparison
+    _, prev_es = fetch_finance_data(".INX:INDEXSP") 
 
-    # 2. AI News Analysis (Bulk JSON Method)
+    # 2. AI News Analysis
     news = get_all_market_news()
     sentiment_score = sum(score for _, score, _, _ in news)
 
     # 3. Merged Bias Logic
     direction, reasons = estimate_direction(spx, es, prev_es, sentiment_score, vix, news)
 
-    # 4. Final Alert
+    # 4. SET THE NEW SUBJECT LINE HERE
+    subject = f"CDUS Precision Signal: {direction} | {slot_label}"
+
+    # 5. Final Alert
     send_email(
-        subject=f"📊 Market Alert | {slot_label}",
+        subject=subject,
         spx=spx,
         vix=vix,
         es=es,
@@ -506,4 +507,8 @@ def main():
         move_msg="N/A",
         to_email=os.getenv("EMAIL_TO")
     )
-    print(f"✅ {slot_label} Sent Successfully.")
+    print(f"✅ {slot_label} Sent Successfully with Precision Logic.")
+
+
+if __name__ == "__main__":
+    main()
