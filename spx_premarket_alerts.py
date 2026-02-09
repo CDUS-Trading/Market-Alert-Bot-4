@@ -309,9 +309,9 @@ def estimate_direction(spx, es, prev_es, sentiment_score, vix, news):
 
     # Final Decision (Forced Binary)
     if score > 0 or (score == 0 and sentiment_score > 0):
-        direction = "📈 Forced Bullish"
+        direction = "📈 Bullish"
     else:
-        direction = "📉 Forced Bearish"
+        direction = "📉 Bearish"
 
     return direction, reasons
 
@@ -493,7 +493,7 @@ def main():
     direction, reasons = estimate_direction(spx, es, prev_es, sentiment_score, vix, news)
 
     # 4. SET THE NEW SUBJECT LINE HERE
-    subject = f"CDUS Precision Signal: {direction} | {slot_label}"
+    subject = f"CDUS Git V2"
 
     # 5. Final Alert
     send_email(
