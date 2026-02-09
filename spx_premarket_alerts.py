@@ -311,7 +311,33 @@ def log_premarket_prediction(date, spx, es, vix, sentiment_score, direction, new
             direction, "nan", "nan", "nan", news_str
         ])
 
+# =============================
+# ⏰ Time Control & Scheduler
+# =============================
 
+def now_chicago():
+    tz = pytz.timezone("America/Chicago")
+    return datetime.datetime.now(tz)
+
+def wait_until_chicago(target_h, target_m, max_wait_minutes=60):
+    """Wait until the clock hits the exact target time in Chicago."""
+    start = now_chicago()
+    deadline = start + timedelta(minutes=max_wait_minutes)
+
+    while True:
+        now = now_chicago()
+        target = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+
+        # If we reached or passed the target, stop waiting
+        if now >= target:
+            return
+
+        # Safety timeout
+        if now >= deadline:
+            print(f"⚠️ Wait timeout reached. Proceeding at {now}")
+            return
+
+        time.sleep(10) # Check every 10 seconds
 
 # =============================
 # 📧 Email Notifier
@@ -387,38 +413,48 @@ def send_email(subject, spx, vix, es, news, direction, reasons, move_msg, to_ema
 # =============================
 
 def main():
-    today = datetime.date.today()
-    print(f"🧠 Using OpenAI model: {openai_model}")
+    now = now_chicago()
+    print(f"Current Chicago Time: {now.strftime('%I:%M %p %Z')}")
 
+    # Determine which alert slot we are in
+    # Slot 1: Morning (Triggered by 7:50 AM Cron)
+    if now.hour < 10:
+        print("⏳ Waiting for 8:00 AM Sharp...")
+        wait_until_chicago(8, 0)
+        slot_label = "8:30 Trade Signal"
+    
+    # Slot 2: Mid-day (Triggered by 11:30 AM Cron)
+    elif 10 <= now.hour < 13:
+        # Note: Your cron is at 11:30, so it might start at 11:35.
+        # This will wait for 11:30, but since it's already past, it will fire immediately.
+        # To send 30 mins before 12:00, you should trigger cron at 11:00 AM instead.
+        print("⏳ Waiting for 11:30 AM Sharp...")
+        wait_until_chicago(11, 30)
+        slot_label = "12:00 Trade Signal"
+    
+    else:
+        print("❌ Outside scheduled window. Exiting.")
+        return
+
+    today = datetime.date.today()
+    
     # 1. Get market data
     spx = get_spx()
     vix = get_vix()
     es = get_es()
 
-    # 2. Scrape and classify headlines
+    # 2. Scrape and classify
     news = get_all_market_news()
-
     sentiment_score = sum(score for _, score, _, _ in news)
 
-    # 3. Market bias and direction
+    # 3. Market bias
     direction, reasons = estimate_direction(spx, es, sentiment_score, vix, news)
 
-    # 5. Print console version of alert (optional)
-    print(f"\n📊 Pre-Market Alert for {today} Test Env")
-    print(f"🔹 SPX: {spx}  🔺 VIX: {vix}  📉 ES: {es}")
-    print("\n📰 Headlines:")
-    for _, _, h, _ in news:
-        print(f"- {h}")
-    print(f"\n📊 Market Bias: {direction}")
-    for r in reasons:
-        print(f"- {r}")
-
-    # 6. Log results to CSV
+    # 4. Log and Send
     log_premarket_prediction(today, spx, es, vix, sentiment_score, direction, news)
-
-    # 7. Send styled email
+    
     send_email(
-        subject="📊 Pre-Market Alert Test Env",
+        subject=f"📊 Market Alert | {slot_label}",
         spx=spx,
         vix=vix,
         es=es,
@@ -428,6 +464,4 @@ def main():
         move_msg="N/A",
         to_email=os.getenv("EMAIL_TO")
     )
-
-if __name__ == "__main__":
-    main()
+    print(f"✅ Alert for {slot_label} completed successfully.")
