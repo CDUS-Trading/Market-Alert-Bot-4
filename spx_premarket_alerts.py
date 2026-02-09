@@ -270,25 +270,51 @@ def get_es():
 # 📋 Analysis & Bias
 # =============================
 
-def estimate_direction(spx, es, sentiment_score, vix, news):
-    # Only use sentiment_score for now
-    if sentiment_score > 0:
-        direction = "📈 Bullish"
-    elif sentiment_score < 0:
-        direction = "📉 Bearish"
+def estimate_direction(spx, es, prev_es, sentiment_score, vix, news):
+    score = 0
+    reasons = []
+
+    # Pillar 1: ES Gap (Price Action)
+    if isinstance(es, float) and isinstance(prev_es, float):
+        gap = es - prev_es
+        reasons.append(f"ES Gap: {gap:+.2f} pts")
+        if gap > 8:
+            score += 1
+            reasons.append("✅ Bullish: Strong overnight futures gap")
+        elif gap < -8:
+            score -= 1
+            reasons.append("❌ Bearish: Weak overnight futures gap")
     else:
-        direction = "🔹 Neutral"
+        reasons.append("⚠️ Gap calculation skipped (Missing ES data)")
 
-    avg_conf = sum(c for _, _, _, c in news) / len(news) if news else 0.5
-    direction_with_conf = f"{direction} (Confidence: {round(avg_conf, 2)})"
+    # Pillar 2: AI Sentiment (News Context)
+    avg_conf = sum(c for _, _, _, c in news) / len(news) if news else 0
+    reasons.append(f"AI Sentiment Score: {sentiment_score} (Conf: {round(avg_conf, 2)})")
+    
+    if sentiment_score >= 3:
+        score += 1
+        reasons.append("✅ Bullish: News sentiment is positive")
+    elif sentiment_score <= -3:
+        score -= 1
+        reasons.append("❌ Bearish: News sentiment is negative")
 
-    # Debug log
-    print("🧪 DEBUG NEWS-ONLY DIRECTION")
-    print(f"  - Total Sentiment Score: {sentiment_score}")
-    print(f"  - Avg News Confidence: {round(avg_conf, 2)}")
-    print(f"  - Direction: {direction_with_conf}")
+    # Pillar 3: VIX (Volatility/Fear)
+    if isinstance(vix, float):
+        if vix > 25:
+            score -= 1
+            reasons.append(f"❌ Bearish: High VIX ({vix}) suggests elevated risk")
+        elif vix < 15:
+            score += 1
+            reasons.append(f"✅ Bullish: Low VIX ({vix}) suggests market calm")
 
-    return direction_with_conf, [f"News-driven sentiment score = {sentiment_score}"]
+    # Final Decision (Forced Binary)
+    # If score is 0 (Tie), we use sentiment_score as the tie-breaker
+    if score > 0 or (score == 0 and sentiment_score > 0):
+        direction = "📈 Forced Bullish"
+    else:
+        direction = "📉 Forced Bearish"
+
+    return direction, reasons
 
 # =============================
 # 📅 Logging
@@ -410,7 +436,30 @@ def send_email(subject, spx, vix, es, news, direction, reasons, move_msg, to_ema
             print("✅ Email sent.")
     except Exception as e:
         print("❌ Email failed:", e)
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
 
+def fetch_finance_data(symbol):
+    """Fetches price and previous close from Google Finance"""
+    try:
+        url = f"https://www.google.com/finance/quote/{symbol}"
+        res = requests.get(url, headers=HEADERS, timeout=10)
+        soup = BeautifulSoup(res.text, "html.parser")
+        
+        # Current Price
+        price_el = soup.select_one("div.YMlKec.fxKbKc")
+        current_price = float(price_el.text.replace(",", "").replace("$", "")) if price_el else None
+        
+        # Previous Close
+        prev_close = None
+        for row in soup.select("div.gyFHrc"):
+            if "Previous close" in row.text:
+                val_text = row.select_one("div.P6K39c").text
+                prev_close = float(val_text.replace(",", "").replace("$", ""))
+                break
+        return current_price, prev_close
+    except Exception as e:
+        print(f"⚠️ Error fetching {symbol}: {e}")
+        return None, None
 # =============================
 # 📊 Main
 # =============================
@@ -419,43 +468,33 @@ def main():
     now = now_chicago()
     print(f"Current Chicago Time: {now.strftime('%I:%M %p %Z')}")
 
-    # Determine which alert slot we are in
-    # Slot 1: Morning (Triggered by 7:50 AM Cron)
+    # Slot Identification
     if now.hour < 10:
-        print("⏳ Waiting for 8:00 AM Sharp...")
-        wait_until_chicago(8, 0)
-        slot_label = "8:30 Trade Signal"
-    
-    # Slot 2: Mid-day (Triggered by 11:30 AM Cron)
+        target_h, target_m, slot_label = 8, 0, "8:30 Trade Signal"
     elif 10 <= now.hour < 13:
-        # Note: Your cron is at 11:30, so it might start at 11:35.
-        # This will wait for 11:30, but since it's already past, it will fire immediately.
-        # To send 30 mins before 12:00, you should trigger cron at 11:00 AM instead.
-        print("⏳ Waiting for 11:30 AM Sharp...")
-        wait_until_chicago(11, 30)
-        slot_label = "12:00 Trade Signal"
-    
+        target_h, target_m, slot_label = 11, 30, "12:00 Trade Signal"
     else:
         print("❌ Outside scheduled window. Exiting.")
         return
 
-    today = datetime.date.today()
-    
-    # 1. Get market data
+    print(f"⏳ Waiting for {target_h}:{target_m:02d} AM Sharp...")
+    wait_until_chicago(target_h, target_m)
+
+    # 1. Data Collection
     spx = get_spx()
     vix = get_vix()
     es = get_es()
+    # If using the Google Finance method for prev_es:
+    _, prev_es = fetch_finance_data("ESW00:CME_MINI") 
 
-    # 2. Scrape and classify
+    # 2. AI News Analysis (Bulk JSON Method)
     news = get_all_market_news()
     sentiment_score = sum(score for _, score, _, _ in news)
 
-    # 3. Market bias
-    direction, reasons = estimate_direction(spx, es, sentiment_score, vix, news)
+    # 3. Merged Bias Logic
+    direction, reasons = estimate_direction(spx, es, prev_es, sentiment_score, vix, news)
 
-    # 4. Log and Send
-    log_premarket_prediction(today, spx, es, vix, sentiment_score, direction, news)
-    
+    # 4. Final Alert
     send_email(
         subject=f"📊 Market Alert | {slot_label}",
         spx=spx,
@@ -467,4 +506,4 @@ def main():
         move_msg="N/A",
         to_email=os.getenv("EMAIL_TO")
     )
-    print(f"✅ Alert for {slot_label} completed successfully.")
+    print(f"✅ {slot_label} Sent Successfully.")
